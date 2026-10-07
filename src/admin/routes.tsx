@@ -425,6 +425,11 @@ export function registerAdmin(app: Hono<AppEnv>, opts: AdminOptions = {}): void 
     const f = await readForm(c);
     if (!f["confirm"]) return c.redirect(`/admin/bots/${bot.id}?ok=confirm`, 302);
     const r = await rotateKey(bot.id);
+    // Unused setup links still holding the old key would hand out a dead key; revoke them.
+    await prisma.setupLink.updateMany({
+      where: { botId: bot.id, usedAt: null, revokedAt: null, apiKeyEnc: { not: null } },
+      data: { revokedAt: new Date(), apiKeyEnc: null },
+    });
     await audit({
       actorType: "ADMIN",
       actorId: "admin",
