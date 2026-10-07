@@ -21,13 +21,39 @@ const int = (def: number, min: number, max: number) =>
       return n;
     });
 
-const secret32 = z.string().refine((v) => {
-  try {
-    return Buffer.from(v, "base64").length === 32 && /^[A-Za-z0-9+/]+={0,2}$/.test(v);
-  } catch {
-    return false;
+/**
+ * Normalizes a pasted secret: trims whitespace, strips surrounding quotes, drops an accidental
+ * "NAME=" prefix (pasting a whole gen:secrets line), and maps base64url to standard base64.
+ */
+export function normalizeSecret(raw: string): string {
+  let v = raw.trim();
+  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
+    v = v.slice(1, -1).trim();
   }
-}, "must be base64 that decodes to exactly 32 bytes (run npm run gen:secrets)");
+  const prefixed = /^(?:SESSION_SECRET|KEY_PEPPER|ENCRYPTION_KEY)=(.+)$/.exec(v);
+  if (prefixed) v = prefixed[1]!.trim();
+  return v.replace(/-/g, "+").replace(/_/g, "/");
+}
+
+const GEN_HINT = "generate one with `npm run gen:secrets` or `openssl rand -base64 32`";
+
+/** 32 random bytes as base64. Errors describe the problem without echoing the value. */
+const secret32 = z.string().transform((raw, ctx) => {
+  const v = normalizeSecret(raw);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(v)) {
+    ctx.addIssue({ code: "custom", message: `isn't valid base64 (it contains spaces or other characters); ${GEN_HINT}` });
+    return z.NEVER;
+  }
+  const n = Buffer.from(v, "base64").length;
+  if (n !== 32) {
+    ctx.addIssue({
+      code: "custom",
+      message: `decodes to ${n} bytes but must be exactly 32 (${v.length} characters; expected 44); ${GEN_HINT}`,
+    });
+    return z.NEVER;
+  }
+  return v;
+});
 
 const schema = z.object({
   NODE_ENV: z.string().optional().default("development"),

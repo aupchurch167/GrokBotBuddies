@@ -32,6 +32,39 @@ describe("A-02 config", () => {
     expect(() => loadConfig({ ...base, KEY_PEPPER: "c2hvcnQ=" })).toThrow(/KEY_PEPPER/);
   });
 
+  it("accepts secrets pasted with whitespace, quotes, a NAME= prefix, or base64url", () => {
+    const raw = Buffer.alloc(32, 7).toString("base64");
+    const url = Buffer.alloc(32, 0xfb).toString("base64url");
+    const c = loadConfig({
+      ...base,
+      SESSION_SECRET: `  ${raw}\n`,
+      KEY_PEPPER: `"${raw}"`,
+      ENCRYPTION_KEY: `ENCRYPTION_KEY=${raw}`,
+    });
+    expect(c.SESSION_SECRET).toBe(raw);
+    expect(c.KEY_PEPPER).toBe(raw);
+    expect(c.ENCRYPTION_KEY).toBe(raw);
+    expect(Buffer.from(loadConfig({ ...base, KEY_PEPPER: url }).KEY_PEPPER, "base64")).toEqual(Buffer.alloc(32, 0xfb));
+    // Padding is never mistaken for a NAME= prefix.
+    const allUpper = Buffer.from("ABCDEFGHIJKLMNOPQRSTUVWXYZ012345", "latin1").toString("base64");
+    expect(loadConfig({ ...base, KEY_PEPPER: allUpper }).KEY_PEPPER).toBe(allUpper);
+  });
+
+  it("explains what's wrong with a bad secret without echoing it", () => {
+    const short = Buffer.alloc(16, 1).toString("base64");
+    expect(() => loadConfig({ ...base, KEY_PEPPER: short })).toThrow(
+      /KEY_PEPPER: decodes to 16 bytes but must be exactly 32 \(24 characters; expected 44\)/,
+    );
+    let msg = "";
+    try {
+      loadConfig({ ...base, SESSION_SECRET: "my secret phrase!" });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
+    expect(msg).toMatch(/SESSION_SECRET: isn't valid base64/);
+    expect(msg).not.toContain("my secret phrase");
+  });
+
   it("rejects a non-argon2id password hash and a trailing slash base url", () => {
     expect(() => loadConfig({ ...base, ADMIN_PASSWORD_HASH: "plain" })).toThrow(/ADMIN_PASSWORD_HASH/);
     expect(() => loadConfig({ ...base, PUBLIC_BASE_URL: "https://x.com/" })).toThrow(/PUBLIC_BASE_URL/);
