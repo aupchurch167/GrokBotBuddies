@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { buildApp } from "./app.js";
+import { DoorbellWorker } from "./doorbell/worker.js";
 import { config } from "./config.js";
 import { prisma } from "./db.js";
 import { log } from "./lib/logger.js";
@@ -12,6 +13,8 @@ async function main(): Promise<void> {
     log.info({ port: info.port }, "Bot Bridge listening"),
   );
   startLimiterSweeper();
+  const worker = new DoorbellWorker();
+  worker.start();
 
   let shuttingDown = false;
   const shutdown = async (signal: string) => {
@@ -19,7 +22,9 @@ async function main(): Promise<void> {
     shuttingDown = true;
     log.info({ signal }, "shutting down");
     stopLimiterSweeper();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
+    const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+    await worker.stop(10_000);
+    await Promise.race([closed, new Promise((r) => setTimeout(r, 5_000).unref())]);
     await prisma.$disconnect().catch(() => {});
     process.exit(0);
   };
