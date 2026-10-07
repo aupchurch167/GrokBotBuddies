@@ -6,7 +6,7 @@ const base = {
   DATABASE_URL: "postgresql://x@localhost/db",
   PUBLIC_BASE_URL: "https://bridge.example.com",
   ADMIN_EMAIL: "a@example.com",
-  ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=65536,t=3,p=4$abc$def",
+  ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=65536,p=4,t=3$6PmR0h5l9IQaHWmaVpqHBg$bdLWAJWFI59MBwDAENX/9pluRYjQ+dtrbIIPiZPDMIA",
   SESSION_SECRET: Buffer.alloc(32, 1).toString("base64"),
   KEY_PEPPER: Buffer.alloc(32, 2).toString("base64"),
   ENCRYPTION_KEY: Buffer.alloc(32, 3).toString("base64"),
@@ -72,6 +72,18 @@ describe("A-02 config", () => {
     }
     expect(msg).toMatch(/SESSION_SECRET: contains spaces/);
     expect(msg).not.toContain("my secret phrase");
+  });
+
+  it("rejects the .env.example placeholder hash and accepts a quoted real one", () => {
+    expect(() =>
+      loadConfig({ ...base, ADMIN_PASSWORD_HASH: "$argon2id$v=19$m=65536,t=3,p=4$REPLACE_ME$REPLACE_ME" }),
+    ).toThrow(/ADMIN_PASSWORD_HASH: looks like an incomplete or placeholder argon2id hash/);
+    // node-argon2 writes m,p,t; browser libraries write m,t,p. Both are accepted.
+    const browserOrder = "$argon2id$v=19$m=65536,t=3,p=4$W5DzXl4KbQnF1vZbTq8m1A$zhWYmaYQQ2qJi3rChaxKHp1K27Rs7Az9mJFcxqvYGXc";
+    expect(loadConfig({ ...base, ADMIN_PASSWORD_HASH: browserOrder }).ADMIN_PASSWORD_HASH).toBe(browserOrder);
+    expect(loadConfig({ ...base, ADMIN_PASSWORD_HASH: `'${base.ADMIN_PASSWORD_HASH}' ` }).ADMIN_PASSWORD_HASH).toBe(
+      base.ADMIN_PASSWORD_HASH,
+    );
   });
 
   it("rejects a non-argon2id password hash and a trailing slash base url", () => {

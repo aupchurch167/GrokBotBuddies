@@ -65,7 +65,20 @@ const schema = z.object({
     .min(1, "is required")
     .refine((v) => /^https?:\/\/[^/]+$/.test(v), "must be an http(s) origin with no path and no trailing slash"),
   ADMIN_EMAIL: z.string().min(3, "is required"),
-  ADMIN_PASSWORD_HASH: z.string().startsWith("$argon2id$", "must be an argon2id hash (run npm run hash-password)"),
+  ADMIN_PASSWORD_HASH: z.string().transform((raw, ctx) => {
+    let v = raw.trim();
+    if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) v = v.slice(1, -1).trim();
+    if (!/^\$argon2id\$v=19\$[mtp]=\d+(?:,[mtp]=\d+){2}\$[A-Za-z0-9+/]{11,}\$[A-Za-z0-9+/]{16,}$/.test(v)) {
+      ctx.addIssue({
+        code: "custom",
+        message: v.startsWith("$argon2id$")
+          ? "looks like an incomplete or placeholder argon2id hash; generate a real one with npm run hash-password"
+          : "must be an argon2id hash (run npm run hash-password)",
+      });
+      return z.NEVER;
+    }
+    return v;
+  }),
   SESSION_SECRET: secret32,
   KEY_PEPPER: secret32,
   ENCRYPTION_KEY: secret32,
