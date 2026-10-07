@@ -1,0 +1,236 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  runtime             = "nodejs"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum BotStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum DoorbellState {
+  NONE // no webhook saved
+  OK // saved; last test/doorbell succeeded or has not failed permanently
+  BROKEN // permanent failure; doorbells paused until a test passes again
+}
+
+enum ConnectionStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum DoorbellJobStatus {
+  PENDING // waiting for debounce; coalescible
+  SENDING // claimed by the worker
+  RETRYING // failed, waiting for backoff; coalescible
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum ActorType {
+  ADMIN
+  BOT
+  OWNER
+  SYSTEM
+}
+
+enum AuditAction {
+  ADMIN_LOGIN
+  ADMIN_LOGIN_FAILED
+  ADMIN_LOGOUT
+  BOT_CREATED
+  BOT_UPDATED
+  BOT_DISABLED
+  BOT_ENABLED
+  BOT_KEY_ROTATED
+  BOT_DOORBELL_CLEARED
+  BOT_DOORBELL_SET
+  BOT_DOORBELL_TESTED
+  BOT_DOORBELL_BROKEN
+  SETUP_LINK_CREATED
+  SETUP_LINK_REVOKED
+  SETUP_LINK_OPENED
+  SETUP_LINK_KEY_REVEALED
+  SETUP_LINK_COMPLETED
+  CONNECTION_APPROVED
+  CONNECTION_REACTIVATED
+  CONNECTION_REVOKED
+  MESSAGE_VIEWED
+  DOORBELL_JOB_RETRIED
+  RETENTION_PURGE
+}
+
+model Bot {
+  id                  String        @id // bot_<20 base62>
+  name                String        @db.VarChar(60)
+  nameKey             String        @unique @db.VarChar(60) // trim + collapse spaces + lowercase
+  ownerName           String        @db.VarChar(80)
+  ownerEmail          String?       @db.VarChar(254)
+  notes               String?       @db.VarChar(1000)
+  status              BotStatus     @default(ACTIVE)
+  apiKeyPrefix        String        @unique @db.VarChar(8)
+  apiKeyHash          String        @db.Char(64) // hex HMAC-SHA256
+  apiKeyRotatedAt     DateTime      @default(now())
+  webhookUrl          String?       @db.VarChar(500)
+  webhookKeyEnc       String?       @db.VarChar(1000) // v1:<iv>:<tag>:<ct>
+  doorbellState       DoorbellState @default(NONE)
+  doorbellUpdatedAt   DateTime?
+  lastDoorbellError   String?       @db.VarChar(500)
+  sendLimitPerHour    Int           @default(60)
+  mcpCallLimitPerHour Int           @default(600)
+  lastSeenAt          DateTime?
+  disabledAt          DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  connectionsAsA   Connection[]   @relation("ConnectionBotA")
+  connectionsAsB   Connection[]   @relation("ConnectionBotB")
+  messagesSent     Message[]      @relation("MessageFrom")
+  messagesReceived Message[]      @relation("MessageTo")
+  doorbellJobs     DoorbellJob[]
+  usage            UsageCounter[]
+  setupLinks       SetupLink[]
+
+  @@index([status])
+}
+
+model Connection {
+  id         String           @id // con_…
+  botAId     String // always the lexicographically smaller bot id
+  botBId     String
+  status     ConnectionStatus @default(ACTIVE)
+  note       String?          @db.VarChar(500)
+  approvedAt DateTime         @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  botA     Bot       @relation("ConnectionBotA", fields: [botAId], references: [id], onDelete: Restrict)
+  botB     Bot       @relation("ConnectionBotB", fields: [botBId], references: [id], onDelete: Restrict)
+  messages Message[]
+
+  @@unique([botAId, botBId])
+  @@index([botBId])
+  @@index([status])
+}
+
+model Message {
+  id           String    @id // msg_…
+  connectionId String
+  fromBotId    String
+  toBotId      String
+  threadId     String // = id of the thread's first message
+  replyToId    String? // plain id, no FK (parent may be purged)
+  subject      String?   @db.VarChar(200)
+  body         String    @db.Text
+  createdAt    DateTime  @default(now())
+  deliveredAt  DateTime? // set when a doorbell covering this message succeeded
+  readAt       DateTime?
+
+  connection Connection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  fromBot    Bot        @relation("MessageFrom", fields: [fromBotId], references: [id], onDelete: Restrict)
+  toBot      Bot        @relation("MessageTo", fields: [toBotId], references: [id], onDelete: Restrict)
+
+  @@index([toBotId, readAt, createdAt(sort: Desc)])
+  @@index([toBotId, createdAt(sort: Desc)])
+  @@index([fromBotId, createdAt])
+  @@index([threadId, createdAt])
+  @@index([connectionId, createdAt])
+  @@index([createdAt])
+}
+
+model DoorbellJob {
+  id             String            @id // dbj_…
+  botId          String // recipient bot
+  status         DoorbellJobStatus @default(PENDING)
+  coalesceKey    String?           @unique // = botId while PENDING/RETRYING, else NULL
+  attempts       Int               @default(0)
+  nextAttemptAt  DateTime
+  claimedAt      DateTime?
+  sentAt         DateTime?
+  lastStatusCode Int?
+  lastError      String?           @db.VarChar(500)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextAttemptAt])
+  @@index([botId, createdAt(sort: Desc)])
+}
+
+model UsageCounter {
+  botId            String
+  month            String   @db.Char(7) // UTC "YYYY-MM"
+  messagesSent     Int      @default(0)
+  messagesReceived Int      @default(0)
+  mcpCalls         Int      @default(0)
+  doorbellsSent    Int      @default(0)
+  doorbellsFailed  Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Restrict)
+
+  @@id([botId, month])
+  @@index([month])
+}
+
+model SetupLink {
+  id            String    @id // sl_…
+  botId         String
+  tokenHash     String    @unique @db.Char(64) // sha256 hex of the URL token
+  apiKeyEnc     String?   @db.VarChar(1000) // encrypted plaintext key; nulled on reveal
+  keyRevealedAt DateTime?
+  saveAttempts  Int       @default(0)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  bot Bot @relation(fields: [botId], references: [id], onDelete: Restrict)
+
+  @@index([botId, createdAt(sort: Desc)])
+}
+
+model AdminSession {
+  id         String   @id // ses_…
+  tokenHash  String   @unique @db.Char(64)
+  csrfToken  String   @db.VarChar(64)
+  ip         String?  @db.VarChar(64)
+  userAgent  String?  @db.VarChar(300)
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt])
+}
+
+model AuditLog {
+  id         String      @id // aud_…
+  actorType  ActorType
+  actorId    String?     @db.VarChar(64) // "admin", bot id, setup link id, or null for SYSTEM
+  action     AuditAction
+  targetType String?     @db.VarChar(32) // bot | connection | message | setup_link | doorbell_job
+  targetId   String?     @db.VarChar(64)
+  ip         String?     @db.VarChar(64)
+  metadata   Json? // never contains secrets or message bodies
+  createdAt  DateTime    @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+}
+
+model JobRun {
+  name       String   @id @db.VarChar(64) // "retention"
+  lastRunAt  DateTime
+  lastResult Json?
+}

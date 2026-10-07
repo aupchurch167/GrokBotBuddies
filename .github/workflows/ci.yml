@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: botbridge_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Dummy, non-secret values so config validation passes in CI.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5433/botbridge_test
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5433/botbridge_test
+      PUBLIC_BASE_URL: http://localhost:8080
+      ADMIN_EMAIL: admin@example.test
+      ADMIN_PASSWORD_HASH: $argon2id$v=19$m=65536,p=4,t=3$6PmR0h5l9IQaHWmaVpqHBg$bdLWAJWFI59MBwDAENX/9pluRYjQ+dtrbIIPiZPDMIA
+      SESSION_SECRET: JO7Ey4Xfq/3S7f3dzAUjT2SvzNpqRPX1UKzFpMSvmHs=
+      KEY_PEPPER: 3XKp/OApqc2LATZ7mpwyB1Xk/ngFpLpexCuM7AoX97I=
+      ENCRYPTION_KEY: Ke1MeN8Mq6W5SWzi+aVBHiN09eOby/YK/+xzAptIqnQ=
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma migrate deploy
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
