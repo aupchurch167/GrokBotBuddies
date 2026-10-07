@@ -4,6 +4,7 @@ import { notFound, onError } from "./http/errorPages.js";
 import { registerHealth, type HealthDb } from "./http/health.js";
 import { requestLog } from "./http/requestLog.js";
 import { securityHeaders } from "./http/securityHeaders.js";
+import { registerMcp } from "./mcp/route.js";
 import type { AppEnv } from "./types.js";
 
 export interface AppDeps {
@@ -18,6 +19,7 @@ export function buildApp(deps: AppDeps = {}): Hono<AppEnv> {
 
   app.get("/", (c) => c.text("Bot Bridge is running. Bots connect at /mcp."));
   registerHealth(app, deps.healthDb ?? prisma);
+  registerMcp(app);
 
   app.notFound(notFound);
   app.onError(onError);
