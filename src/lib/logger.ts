@@ -24,6 +24,7 @@ export const log = pino(
   {
     level: config.LOG_LEVEL,
     base: { service: "bot-bridge" },
+    serializers: { err: safeErr },
     redact: {
       paths: [
         "req.headers.authorization",
@@ -50,3 +51,15 @@ export const log = pino(
   },
   destination,
 );
+
+/**
+ * Error summary safe to log: type, code, and only the first line of the message (Prisma puts
+ * query arguments, which may include message bodies, on later lines), plus the stack frames.
+ */
+export function safeErr(e: unknown): { type: string; code?: string; message: string; stack?: string } {
+  if (!(e instanceof Error)) return { type: typeof e, message: "non-error thrown" };
+  const first = (e.message.split("\n").find((l) => l.trim()) ?? "").slice(0, 200);
+  const frames = (e.stack ?? "").split("\n").filter((l) => l.trimStart().startsWith("at ")).slice(0, 8).join("\n");
+  const code = (e as { code?: unknown }).code;
+  return { type: e.name, ...(typeof code === "string" ? { code } : {}), message: first, ...(frames ? { stack: frames } : {}) };
+}

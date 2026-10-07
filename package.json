@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
-    "start": "prisma migrate deploy && node dist/server.js",
+    "start": "prisma migrate deploy && exec node dist/server.js",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
