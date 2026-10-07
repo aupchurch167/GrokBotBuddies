@@ -33,8 +33,8 @@ jobs:
       KEY_PEPPER: 3XKp/OApqc2LATZ7mpwyB1Xk/ngFpLpexCuM7AoX97I=
       ENCRYPTION_KEY: Ke1MeN8Mq6W5SWzi+aVBHiN09eOby/YK/+xzAptIqnQ=
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
           cache: npm
