@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../../src/config.js";
 
@@ -28,8 +29,18 @@ describe("A-02 config", () => {
     });
   }
 
-  it("rejects secrets that are not 32 bytes", () => {
-    expect(() => loadConfig({ ...base, KEY_PEPPER: "c2hvcnQ=" })).toThrow(/KEY_PEPPER/);
+  it("rejects secrets that are too short", () => {
+    expect(() => loadConfig({ ...base, KEY_PEPPER: "c2hvcnQ=" })).toThrow(/KEY_PEPPER: is too short \(8 characters\)/);
+  });
+
+  it("derives a 32-byte key from a long random non-base64 secret", () => {
+    const generated = "Xk9pLr7GqT2mBv4Nc8Zw1Hy6Jd3Fs5Qa"; // 32 chars, decodes to only 24 bytes as base64
+    const c = loadConfig({ ...base, ENCRYPTION_KEY: generated, SESSION_SECRET: `${generated}!#%` });
+    const key = Buffer.from(c.ENCRYPTION_KEY, "base64");
+    expect(key).toHaveLength(32);
+    expect(key).toEqual(createHash("sha256").update(generated).digest());
+    expect(Buffer.from(c.SESSION_SECRET, "base64")).toHaveLength(32);
+    expect(loadConfig({ ...base, ENCRYPTION_KEY: generated }).ENCRYPTION_KEY).toBe(c.ENCRYPTION_KEY);
   });
 
   it("accepts secrets pasted with whitespace, quotes, a NAME= prefix, or base64url", () => {
@@ -52,16 +63,14 @@ describe("A-02 config", () => {
 
   it("explains what's wrong with a bad secret without echoing it", () => {
     const short = Buffer.alloc(16, 1).toString("base64");
-    expect(() => loadConfig({ ...base, KEY_PEPPER: short })).toThrow(
-      /KEY_PEPPER: decodes to 16 bytes but must be exactly 32 \(24 characters; expected 44\)/,
-    );
+    expect(() => loadConfig({ ...base, KEY_PEPPER: short })).toThrow(/KEY_PEPPER: is too short \(24 characters\)/);
     let msg = "";
     try {
       loadConfig({ ...base, SESSION_SECRET: "my secret phrase!" });
     } catch (e) {
       msg = (e as Error).message;
     }
-    expect(msg).toMatch(/SESSION_SECRET: isn't valid base64/);
+    expect(msg).toMatch(/SESSION_SECRET: contains spaces/);
     expect(msg).not.toContain("my secret phrase");
   });
 

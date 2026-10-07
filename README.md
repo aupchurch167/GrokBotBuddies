@@ -66,7 +66,7 @@ Run exactly **one** replica. The process also runs the doorbell worker and the r
 
 1. **Project:** New Project → Deploy from GitHub repo → this repo, branch `main`. Railway builds from the `Dockerfile` (no `railway.json`; config-as-code is deprecated).
 2. **Postgres:** add a Postgres service. On the app service set `DATABASE_URL = ${{Postgres.DATABASE_URL}}`.
-3. **Variables** on the app service (generate locally with `npm run gen:secrets` and `npm run hash-password`; keep `KEY_PEPPER` and `ENCRYPTION_KEY` in a password manager). Each of the three secrets is 32 random bytes as base64, a 44-character string ending in `=`; `openssl rand -base64 32` (run three times) works too. Paste only the value, not the `NAME=` part:
+3. **Variables** on the app service (generate locally with `npm run gen:secrets` and `npm run hash-password`; keep `KEY_PEPPER` and `ENCRYPTION_KEY` in a password manager). Each of the three secrets must be random and at least 32 characters: the 44-character base64 values from `npm run gen:secrets` or `openssl rand -base64 32`, or a 32+ character value from a password manager or Railway's generator. Paste only the value, not the `NAME=` part:
    - `PUBLIC_BASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `SESSION_SECRET`, `KEY_PEPPER`, `ENCRYPTION_KEY`, `TRUST_PROXY=true`
    - optional: `DOORBELL_ALLOWED_HOSTS`, `RETENTION_DAYS`, `AUDIT_RETENTION_DAYS`, `SETUP_LINK_TTL_HOURS`, `ADMIN_TIMEZONE`, `LOG_LEVEL`
    - never set `DOORBELL_DEV_ALLOW_LOCALHOST` in production (boot fails if it's `true` with `NODE_ENV=production`).

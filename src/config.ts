@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import * as z from "zod";
 
 const bool = (def: boolean) =>
@@ -21,38 +22,38 @@ const int = (def: number, min: number, max: number) =>
       return n;
     });
 
-/**
- * Normalizes a pasted secret: trims whitespace, strips surrounding quotes, drops an accidental
- * "NAME=" prefix (pasting a whole gen:secrets line), and maps base64url to standard base64.
- */
-export function normalizeSecret(raw: string): string {
+/** Trims whitespace, strips surrounding quotes, and drops an accidental "NAME=" prefix. */
+export function unwrapSecret(raw: string): string {
   let v = raw.trim();
   if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) {
     v = v.slice(1, -1).trim();
   }
   const prefixed = /^(?:SESSION_SECRET|KEY_PEPPER|ENCRYPTION_KEY)=(.+)$/.exec(v);
-  if (prefixed) v = prefixed[1]!.trim();
-  return v.replace(/-/g, "+").replace(/_/g, "/");
+  return prefixed ? prefixed[1]!.trim() : v;
 }
 
-const GEN_HINT = "generate one with `npm run gen:secrets` or `openssl rand -base64 32`";
+const GEN_HINT = "use a random value of at least 32 characters (e.g. `openssl rand -base64 32` or `npm run gen:secrets`)";
 
-/** 32 random bytes as base64. Errors describe the problem without echoing the value. */
+/**
+ * A 32-byte secret, stored in config as base64. Accepted forms:
+ *  - base64 (or base64url) that decodes to exactly 32 bytes, as printed by `npm run gen:secrets`;
+ *  - any other random string of at least 32 non-space characters (e.g. a password-manager or
+ *    Railway-generated value), from which the 32-byte key is derived with SHA-256.
+ * Errors describe the problem without echoing the value.
+ */
 const secret32 = z.string().transform((raw, ctx) => {
-  const v = normalizeSecret(raw);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(v)) {
-    ctx.addIssue({ code: "custom", message: `isn't valid base64 (it contains spaces or other characters); ${GEN_HINT}` });
+  const v = unwrapSecret(raw);
+  const b64 = v.replace(/-/g, "+").replace(/_/g, "/");
+  if (/^[A-Za-z0-9+/]+={0,2}$/.test(b64) && Buffer.from(b64, "base64").length === 32) return b64;
+  if (/\s/.test(v)) {
+    ctx.addIssue({ code: "custom", message: `contains spaces; ${GEN_HINT}` });
     return z.NEVER;
   }
-  const n = Buffer.from(v, "base64").length;
-  if (n !== 32) {
-    ctx.addIssue({
-      code: "custom",
-      message: `decodes to ${n} bytes but must be exactly 32 (${v.length} characters; expected 44); ${GEN_HINT}`,
-    });
+  if ([...v].length < 32) {
+    ctx.addIssue({ code: "custom", message: `is too short (${[...v].length} characters); ${GEN_HINT}` });
     return z.NEVER;
   }
-  return v;
+  return createHash("sha256").update(v, "utf8").digest("base64");
 });
 
 const schema = z.object({
